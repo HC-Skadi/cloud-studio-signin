@@ -233,53 +233,26 @@ def load_config(config_path: str = "config.json") -> dict:
 
 
 def send_notification(message: str, config: dict) -> None:
-    """
-    发送通知
-
-    支持的渠道:
-    - TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID
-    - BARK_KEY
-    - SERVERCHAN_KEY (Server酱)
-    """
-    # Telegram 通知
-    telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN") or config.get("telegram", {}).get("bot_token")
-    telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID") or config.get("telegram", {}).get("chat_id")
-
-    if telegram_token and telegram_chat_id:
-        try:
-            tg_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-            requests.post(tg_url, json={
-                "chat_id": telegram_chat_id,
-                "text": message,
-                "parse_mode": "HTML",
-            }, timeout=10)
-            print("Telegram 通知已发送")
-        except requests.RequestException as e:
-            print(f"Telegram 通知发送失败: {e}")
-
-    # Bark 通知
-    bark_key = os.environ.get("BARK_KEY") or config.get("bark", {}).get("key")
-    if bark_key:
-        try:
-            bark_url = f"https://api.day.app/{bark_key}/Cloud%20Studio%20签到/{message}"
-            requests.get(bark_url, timeout=10)
-            print("Bark 通知已发送")
-        except requests.RequestException as e:
-            print(f"Bark 通知发送失败: {e}")
-
-    # Server酱 通知 (https://sct.ftqq.com/)
+    """发送 Server酱 通知"""
     serverchan_key = os.environ.get("SERVERCHAN_KEY") or config.get("serverchan", {}).get("key")
-    if serverchan_key:
-        try:
-            # Server酱 SendKey 模式
-            sc_url = f"https://sctapi.ftqq.com/{serverchan_key}.send"
-            requests.post(sc_url, data={
-                "title": "Cloud Studio 签到通知",
-                "desp": message,
-            }, timeout=10)
+    if not serverchan_key:
+        print("未配置 SERVERCHAN_KEY，跳过通知")
+        return
+
+    try:
+        sc_url = f"https://sctapi.ftqq.com/{serverchan_key}.send"
+        resp = requests.post(sc_url, data={
+            "title": "Cloud Studio 签到通知",
+            "desp": message,
+        }, timeout=10)
+        resp.raise_for_status()
+        result = resp.json()
+        if result.get("code") == 0:
             print("Server酱 通知已发送")
-        except requests.RequestException as e:
-            print(f"Server酱 通知发送失败: {e}")
+        else:
+            print(f"Server酱 通知发送失败: {result.get('msg')}")
+    except requests.RequestException as e:
+        print(f"Server酱 通知发送失败: {e}")
 
 
 def main():

@@ -27,9 +27,8 @@ jobs:
       - name: Run sign-in
         env:
           CLOUD_STUDIO_COOKIES: ${{ secrets.CLOUD_STUDIO_COOKIES }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          BARK_KEY: ${{ secrets.BARK_KEY }}
+          CLOUD_STUDIO_XSRF_TOKEN: ${{ secrets.CLOUD_STUDIO_XSRF_TOKEN || '' }}
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY || '' }}
         run: |
           python signin.py
 
@@ -37,5 +36,7 @@ jobs:
         if: always()
         env:
           CLOUD_STUDIO_COOKIES: ${{ secrets.CLOUD_STUDIO_COOKIES }}
+          CLOUD_STUDIO_XSRF_TOKEN: ${{ secrets.CLOUD_STUDIO_XSRF_TOKEN || '' }}
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY || '' }}
         run: |
           python signin.py --check

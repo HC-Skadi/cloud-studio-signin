@@ -1,13 +1,13 @@
 # Cloud Studio 每日签到
 
-腾讯 Cloud Studio 每日机时自动签到脚本，支持 GitHub Actions 调度和多种通知渠道。
+腾讯 Cloud Studio 每日机时自动签到脚本，支持 GitHub Actions 调度和 Server酱 通知。
 
 ## 功能
 
 - 自动领取每日 2 小时免费机时
 - GitHub Actions 定时调度（每天北京时间 9:00）
 - 支持手动触发
-- Telegram / Bark / Server酱 通知推送
+- Server酱 通知推送
 - 签到状态查询
 
 ## 快速开始
@@ -37,9 +37,6 @@
 |------|----------|-------------|
 | `CLOUD_STUDIO_COOKIES` | Yes | 腾讯云登录 Cookie |
 | `CLOUD_STUDIO_XSRF_TOKEN` | Yes | XSRF Token |
-| `TELEGRAM_BOT_TOKEN` | No | Telegram Bot Token |
-| `TELEGRAM_CHAT_ID` | No | Telegram Chat ID |
-| `BARK_KEY` | No | Bark 推送 Key |
 | `SERVERCHAN_KEY` | No | Server酱 SendKey |
 
 ### 4. 启用 Actions
@@ -79,13 +76,6 @@ python signin.py --check
 {
   "cookies": "your_cloud_studio_cookies_here",
   "xsrf_token": "your_xsrf_token_here",
-  "telegram": {
-    "bot_token": "your_telegram_bot_token",
-    "chat_id": "your_telegram_chat_id"
-  },
-  "bark": {
-    "key": "your_bark_key"
-  },
   "serverchan": {
     "key": "your_serverchan_sendkey"
   }
