@@ -15,24 +15,31 @@ import requests
 class CloudStudioSignIn:
     """Cloud Studio 签到类"""
 
-    def __init__(self, cookies: str, timeout: int = 30):
+    def __init__(self, cookies: str, xsrf_token: str = "", timeout: int = 30):
         """
         初始化签到类
 
         Args:
-            cookies: Cloud Studio 登录 Cookie
+            cookies: Cloud Studio 完整 Cookie 字符串
+                     格式: cloudstudio-session=xxx; cloudstudio-session-team=wx
+            xsrf_token: XSRF Token (从浏览器开发者工具获取)
             timeout: 请求超时时间(秒)
         """
-        self.cookies = cookies
+        self.cookies = cookies.strip()
         self.timeout = timeout
         self.session = requests.Session()
+        # 解析 cookies 到 session 的 cookie jar
+        self._parse_cookies_to_session(self.cookies)
+        # XSRF Token
+        self._csrf_token = xsrf_token.strip()
+        # 设置请求头
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1 Edg/146.0.0.0",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
             "Referer": "https://cloudstudio.net/user-center",
             "Accept": "application/json",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Accept-Language": "zh-CN,zh-Hans;q=0.9",
             "X-Requested-With": "XMLHttpRequest",
-            "Cookie": cookies,  # 直接设置 Cookie 头
+            "X-XSRF-TOKEN": self._csrf_token,
         })
 
         # Cloud Studio API 端点
@@ -41,6 +48,34 @@ class CloudStudioSignIn:
         self.signin_endpoint = "/api/billing/activityTask/SIGN_IN_2025Q3"
         # 状态查询参数
         self.status_param = "?lastRecord=true"
+
+    def _extract_cookie_value(self, cookie_string: str, name: str) -> str:
+        """从 Cookie 字符串中提取指定名称的值"""
+        for part in cookie_string.split(";"):
+            part = part.strip()
+            if "=" in part:
+                key, value = part.split("=", 1)
+                if key.strip() == name:
+                    return value.strip()
+        return ""
+
+    def _parse_cookies_to_session(self, cookie_string: str) -> None:
+        """将 Cookie 字符串解析到 session 的 cookie jar"""
+        print(f"解析 Cookie 字符串: {cookie_string[:50]}...")
+        for part in cookie_string.split(";"):
+            part = part.strip()
+            if "=" in part:
+                key, value = part.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+                if key and value:
+                    self.session.cookies.set(key, value)
+                    print(f"  添加 Cookie: {key} = {value[:30]}...")
+        print(f"共 {len(list(self.session.cookies))} 个 Cookie")
+
+    def _get_csrf_token(self) -> str:
+        """获取 XSRF Token（已通过构造函数传入）"""
+        return self._csrf_token
 
     def get_user_info(self) -> dict:
         """获取用户信息"""
@@ -60,12 +95,27 @@ class CloudStudioSignIn:
         Returns:
             dict: 签到结果
         """
-        # POST /api/billing/activityTask/SIGN_IN_2025Q3
-        # 每日可领取1次，每次2个机时
+        # 先获取 CSRF Token
+        csrf_token = self._get_csrf_token()
+        if csrf_token:
+            self.session.headers["X-XSRF-TOKEN"] = csrf_token
+
+        # GET /api/billing/activityTask/SIGN_IN_2025Q3 (不带 lastRecord 参数，触发签到)
         url = f"{self.api_base}{self.signin_endpoint}"
 
+        print(f"尝试签到: GET {url}")
+        if csrf_token:
+            print(f"XSRF Token: {csrf_token[:10]}...")
+
+        # 打印 Cookie jar 中的 Cookie
+        jar_cookies = "; ".join(f"{c.name}={c.value[:20] if c.value else 'None'}..."
+                                for c in self.session.cookies)
+        print(f"Cookie Jar: {jar_cookies}")
+
         try:
-            resp = self.session.post(url, timeout=self.timeout)
+            resp = self.session.get(url, timeout=self.timeout)
+            print(f"响应状态: {resp.status_code}")
+            print(f"响应内容: {resp.text[:1000]}")
             resp.raise_for_status()
             result = resp.json()
             return self._parse_signin_result(result)
@@ -79,11 +129,17 @@ class CloudStudioSignIn:
         Returns:
             dict: 签到状态
         """
+        # 先获取 CSRF Token
+        csrf_token = self._get_csrf_token()
+        if csrf_token:
+            self.session.headers["X-XSRF-TOKEN"] = csrf_token
+
         # GET /api/billing/activityTask/SIGN_IN_2025Q3?lastRecord=true
         url = f"{self.api_base}{self.signin_endpoint}{self.status_param}"
 
         try:
             resp = self.session.get(url, timeout=self.timeout)
+            print(f"状态查询响应: {resp.status_code} - {resp.text[:1000]}")
             resp.raise_for_status()
             data = resp.json()
             return self._parse_status_result(data)
@@ -93,33 +149,76 @@ class CloudStudioSignIn:
     def _parse_signin_result(self, response: dict) -> dict:
         """解析签到响应"""
         # 响应格式:
-        # {"code": 0, "message": "success", "data": {...}}
-        # {"code": 400, "message": "已签到", "data": null}
+        # {"code": 0, "msg": "Success", "data": {"taskId": "SIGN_IN_2025Q3", "records": [...]}}
+        # records[0]: {"status": "REWARDED", "rewardNum": 200000000, "rewardType": "INSTANCE_HOUR", ...}
         code = response.get("code", -1)
-        if code == 0:
+        msg = response.get("msg", response.get("message", ""))
+        data = response.get("data") or {}
+        records = data.get("records") or []
+
+        if code == 0 and records:
+            record = records[0]
+            status = record.get("status", "")
+            reward_num = record.get("rewardNum", 0)
+            reward_type = record.get("rewardType", "")
+            reward_expires = record.get("rewardExpires", 0)
+
+            # 奖励数值通常是毫秒或特定单位，转换为小时
+            if reward_type == "INSTANCE_HOUR":
+                # rewardNum 可能是 200000000 (200小时) 或其他值
+                hours = reward_num
+            else:
+                hours = reward_num
+
             return {
                 "success": True,
-                "message": "签到成功",
-                "hours": 2,  # 固定2个机时
+                "message": f"签到成功",
+                "status": status,
+                "hours": hours,
+                "reward_type": reward_type,
+                "reward_expires_days": reward_expires,
+            }
+        elif code == 0 and not records:
+            # 可能已签到或无需签到
+            return {
+                "success": True,
+                "message": msg or "签到完成",
+                "hours": 0,
             }
         else:
             return {
                 "success": False,
-                "message": response.get("message", "签到失败"),
+                "message": msg or response.get("message", "签到失败"),
                 "code": code,
             }
 
     def _parse_status_result(self, response: dict) -> dict:
         """解析状态查询响应"""
         # GET /api/billing/activityTask/SIGN_IN_2025Q3?lastRecord=true
-        # 响应包含 lastRecord 字段表示今日签到状态
-        data = response.get("data", {})
-        last_record = data.get("lastRecord", {})
+        # 响应格式: {"code": 0, "data": {"taskId": "SIGN_IN_2025Q3", "records": [...]}}
+        # records[0]: {"status": "REWARDED", "rewardNum": 200000000, ...}
+        data = response.get("data") or {}
+        records = data.get("records") or {}
+
+        # records 是数组，检查今日是否已签到 (status == "REWARDED")
+        claimed = False
+        reward_info = {}
+        if records:
+            record = records[0] if isinstance(records, list) else records
+            status = record.get("status", "")
+            claimed = status == "REWARDED"
+            if claimed:
+                reward_info = {
+                    "hours": record.get("rewardNum", 0),
+                    "reward_type": record.get("rewardType", ""),
+                    "reward_expires_days": record.get("rewardExpires", 0),
+                    "reward_time": record.get("rewardTime", ""),
+                }
 
         return {
-            "claimed": last_record.get("claimed", False) if last_record else False,
-            "remaining_hours": data.get("remainingHours", 0),
-            "message": "查询成功" if response.get("code") == 0 else f"查询失败: {response.get('message')}",
+            "claimed": claimed,
+            "reward_info": reward_info,
+            "message": "查询成功" if response.get("code") == 0 else f"查询失败: {response.get('msg') or response.get('message')}",
         }
 
 
@@ -195,20 +294,33 @@ def main():
     # 获取 Cookie
     # 优先级: 环境变量 > 配置文件
     cookies = os.environ.get("CLOUD_STUDIO_COOKIES") or config.get("cookies", "")
+    # 获取 XSRF Token
+    xsrf_token = os.environ.get("CLOUD_STUDIO_XSRF_TOKEN") or config.get("xsrf_token", "")
 
     if not cookies:
         print("错误: 未设置 CLOUD_STUDIO_COOKIES")
         print("请设置环境变量或创建 config.json")
         sys.exit(1)
 
+    if not xsrf_token:
+        print("错误: 未设置 CLOUD_STUDIO_XSRF_TOKEN")
+        print("请设置环境变量或创建 config.json")
+        sys.exit(1)
+
+    print("已获取 Cookie，长度:", len(cookies))
+    print("已获取 XSRF Token:", xsrf_token[:10] + "...")
+
     # 执行签到
-    signin = CloudStudioSignIn(cookies)
+    signin = CloudStudioSignIn(cookies, xsrf_token)
 
     if args.check:
         # 仅检查状态
         status = signin.check_signin_status()
         print(f"今日已签到: {status.get('claimed', '未知')}")
-        print(f"剩余机时: {status.get('remaining_hours', '未知')} 小时")
+        if status.get("reward_info"):
+            info = status["reward_info"]
+            print(f"获得奖励: {info.get('hours', '未知')} {info.get('reward_type', '')}")
+            print(f"有效期: {info.get('reward_expires_days', '未知')} 天")
         return
 
     # 执行签到
@@ -217,18 +329,22 @@ def main():
     # 先检查状态
     status = signin.check_signin_status()
     if status.get("claimed"):
-        print("今日已签到，跳过")
-        send_notification("Cloud Studio 签到: 今日已签到 ✅", config)
+        reward_info = status.get("reward_info", {})
+        hours = reward_info.get("hours", 0)
+        print(f"今日已签到，获得 {hours} 小时机时")
+        send_notification(f"Cloud Studio 签到: 今日已签到 (获得 {hours} 小时) ✅", config)
         return
 
     # 执行签到
     result = signin.claim_daily_reward()
 
     if result.get("success"):
-        hours = result.get("hours", 2)
-        msg = f"签到成功! 获得 {hours} 小时机时 🎉"
+        hours = result.get("hours", 0)
+        reward_type = result.get("reward_type", "INSTANCE_HOUR")
+        expires_days = result.get("reward_expires_days", 0)
+        msg = f"签到成功! 获得 {hours} {reward_type} (有效期 {expires_days} 天) 🎉"
         print(msg)
-        send_notification(f"Cloud Studio 签到成功! 获得 {hours} 小时机时", config)
+        send_notification(f"Cloud Studio 签到成功! 获得 {hours} {reward_type}", config)
     else:
         msg = f"签到失败: {result.get('message', '未知错误')}"
         print(msg)
