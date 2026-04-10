@@ -31,12 +31,3 @@ jobs:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY || '' }}
         run: |
           python signin.py
-
-      - name: Check status
-        if: always()
-        env:
-          CLOUD_STUDIO_COOKIES: ${{ secrets.CLOUD_STUDIO_COOKIES }}
-          CLOUD_STUDIO_XSRF_TOKEN: ${{ secrets.CLOUD_STUDIO_XSRF_TOKEN || '' }}
-          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY || '' }}
-        run: |
-          python signin.py --check
