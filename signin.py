@@ -46,6 +46,8 @@ class CloudStudioSignIn:
         self.api_base = "https://cloudstudio.net"
         # 签到 API (2025Q3 活动)
         self.signin_endpoint = "/api/billing/activityTask/SIGN_IN_2025Q3"
+        # 签到领取 API (POST)
+        self.signin_claim_endpoint = "/api/billing/activityTask/SIGN_IN_2025Q3/_reward"
         # 状态查询参数
         self.status_param = "?lastRecord=true"
 
@@ -100,10 +102,10 @@ class CloudStudioSignIn:
         if csrf_token:
             self.session.headers["X-XSRF-TOKEN"] = csrf_token
 
-        # GET /api/billing/activityTask/SIGN_IN_2025Q3 (不带 lastRecord 参数，触发签到)
-        url = f"{self.api_base}{self.signin_endpoint}"
+        # POST /api/billing/activityTask/SIGN_IN_2025Q3/_reward (领取签到奖励)
+        url = f"{self.api_base}{self.signin_claim_endpoint}"
 
-        print(f"尝试签到: GET {url}")
+        print(f"尝试签到: POST {url}")
         if csrf_token:
             print(f"XSRF Token: {csrf_token[:10]}...")
 
@@ -113,7 +115,7 @@ class CloudStudioSignIn:
         print(f"Cookie Jar: {jar_cookies}")
 
         try:
-            resp = self.session.get(url, timeout=self.timeout)
+            resp = self.session.post(url, timeout=self.timeout)
             print(f"响应状态: {resp.status_code}")
             print(f"响应内容: {resp.text[:1000]}")
             resp.raise_for_status()
@@ -292,7 +294,9 @@ def main():
         print(f"今日已签到: {status.get('claimed', '未知')}")
         if status.get("reward_info"):
             info = status["reward_info"]
-            print(f"获得奖励: {info.get('hours', '未知')} {info.get('reward_type', '')}")
+            hours = int(info.get('hours', 0) / 100000000)
+            reward_type = info.get('reward_type', '')
+            print(f"获得奖励: {hours} {reward_type}")
             print(f"有效期: {info.get('reward_expires_days', '未知')} 天")
         return
 
@@ -303,16 +307,15 @@ def main():
     status = signin.check_signin_status()
     if status.get("claimed"):
         reward_info = status.get("reward_info", {})
-        hours = reward_info.get("hours", 0)
+        hours = int(reward_info.get("hours", 0) / 100000000)
         print(f"今日已签到，获得 {hours} 小时机时")
-        send_notification(f"Cloud Studio 签到: 今日已签到 (获得 {hours} 小时) ✅", config)
+        send_notification(f"Cloud Studio 签到: 今日已签到 (获得 {hours} ) ✅", config)
         return
 
     # 执行签到
     result = signin.claim_daily_reward()
-
     if result.get("success"):
-        hours = result.get("hours", 0)
+        hours = int(result.get("hours", 0) / 100000000)
         reward_type = result.get("reward_type", "INSTANCE_HOUR")
         expires_days = result.get("reward_expires_days", 0)
         msg = f"签到成功! 获得 {hours} {reward_type} (有效期 {expires_days} 天) 🎉"
